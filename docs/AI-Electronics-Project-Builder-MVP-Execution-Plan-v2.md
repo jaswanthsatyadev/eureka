@@ -1,26 +1,24 @@
-# AI Electronics Project Builder — MVP Execution Master Plan (v2)
+# AI Electronics Project Builder — MVP Execution Master Plan (v2.1 - Lean MVP)
 
-One shared setup phase, a set of global technical conventions everyone follows, then five master plans — Database, Backend, Agentic AI, Frontend, Storage — each broken into detailed, dependency-checked phases. Every phase now also carries a **Technical Notes** section so whoever picks it up, human or AI agent, has the concrete implementation decisions already made instead of having to guess.
+One shared setup phase, a set of global technical conventions everyone follows, then five master plans — Database, Backend, Agentic AI, Frontend, Storage — each broken into detailed, dependency-checked phases. Every phase carries a **Technical Notes** section so whoever picks it up, human or AI agent, has the concrete implementation decisions already made instead of having to guess.
 
 ---
 
-## Review Summary — What Changed From v1
+## Review Summary — Lean MVP Simplification & Refinements
 
-Going back through the previous plan looking specifically for things that were wrong or dangerously underspecified, here's what got fixed:
+This updated plan streamlines the architecture specifically for MVP velocity, eliminating unnecessary infrastructure overhead:
 
-1. **Real bug — a forward dependency inside the Agentic AI plan.** The old Phase A3 ("Circuit Construction and Validation") depended on the old Phase A6 ("Reference Wiring-Pattern Library"), which appeared *later* in the same list. Anyone working through the AI plan in order would hit a wall at A3. Fixed by moving the Reference Wiring-Pattern Library earlier (it's now A3) and renumbering everything after it. Every cross-reference to the AI plan elsewhere in the document (Frontend F12/F13, AI's own A7/A9) has been updated to match the new numbers.
-2. **A mislabeled dependency.** Backend's old Export Service phase listed "S1 (buckets ready)" as a dependency, but bucket creation actually happens in Master Setup, not in the Storage Plan's Phase S1. Corrected to depend on Setup directly.
-3. **Document order vs. execution order was ambiguous.** The Storage Plan appears last in the document for readability, but a few Backend and Frontend phases correctly depend on it and can't wait until "last." This is now called out explicitly and forcefully in How to Use This Document — document position is not a sequencing signal, only the Depends on line and the Dependency Map are.
-4. **The biggest gap: dozens of implementation-level decisions were left implicit.** Things like — what shape does a mutation request actually take, how does ownership get re-checked on service-role code paths, what are the actual severity levels a validation finding can have, what coordinate system are SVG pin positions defined in, how does the AI's "pause and ask a clarifying question" mechanic actually work under the hood, does Realtime push full state or just a change signal, what happens if an AI run just keeps calling tools forever. Every one of these is exactly the kind of thing where two different implementers (or an AI agent filling gaps with plausible-sounding guesses) would land on two different, incompatible answers. These are now pinned down once in **Global Technical Conventions** below, and referenced from the specific phases they matter most to.
-5. **Every phase gained a Technical Notes section** — concrete, phase-specific guidance beyond the task checklist, so nothing has to be inferred.
-
-Nothing in the actual scope, sequencing philosophy, or the five-plan structure changed — those held up. The fixes are about precision, not direction.
+1. **Removed Redis & External Background Worker Daemons (`Arq`/`Celery`).** For MVP, asynchronous jobs (PDF exports, ZIP generation) run directly in FastAPI using native `BackgroundTasks` or direct async endpoints. This removes the operational complexity, provisioning, and failure modes of Redis, separate worker processes, and connection pooling.
+2. **Simplified Database & Operations.** Replaced scheduled cron rollup daemons and pre-aggregated tables (`system_metrics_daily`) with real-time SQL aggregation queries for admin metrics. Data retention/archival policies (`D10`) and dynamic database-driven model routing tables (`model_routing_config`) are removed/deferred in favor of environment-driven Pydantic configuration.
+3. **Streamlined AI Orchestration.** Removed the extra dynamic LLM "complexity classifier" call in Phase `A7` in favor of declarative per-node model routing (e.g., Gemini Flash for fast searches/extractions, Claude 3.5 Sonnet for circuit reasoning & conversational editing). Deferred the multimodal Datasheet Ingestion Pipeline (`A8`) since component catalog seeding is already handled directly via CSV/JSON bulk import (`B7`).
+4. **Removed CI/CD Pipelines & Automated PR Checks.** Removed CI skeleton workflows, automated PR type-checks, and CI infrastructure to maximize development velocity and eliminate workflow friction for MVP.
+5. **Maintained Core Strengths.** The single mutation choke point (`apply_mutation`), deterministic 3-level validation engine, LangGraph interrupt/checkpointing for user clarification, React Flow viewBox-relative pin coordinate system, and shared project-model source of truth are preserved with zero compromise.
 
 ---
 
 ## How to Use This Document
 
-Every phase has a short ID: `SETUP` for the master setup phase, `D1`–`D10` for Database, `B1`–`B20` for Backend, `A1`–`A10` for Agentic AI, `F1`–`F20` for Frontend, `S1`–`S3` for Storage. 64 phases in total.
+Every phase has a short ID: `SETUP` for the master setup phase, `D1`–`D9` for Database, `B1`–`B20` for Backend, `A1`–`A7` & `A9`–`A10` for Agentic AI, `F1`–`F20` for Frontend, `S1`–`S3` for Storage. 61 phases in total.
 
 Every phase lists exactly what it **Depends on**, including dependencies on other master plans. A phase should not start until everything in its Depends on line is actually complete — not "mostly done."
 
@@ -34,7 +32,7 @@ Each phase has four parts, always in this order: **Depends on**, **Goal**, **Tec
 
 - Run `SETUP` once, first.
 - Start Database phases `D1`–`D6` and Storage phase `S1` immediately afterward, in parallel.
-- Once `D1`–`D3` exist, start Backend phases `B1`–`B7`, alongside Database `D7`–`D10` and Storage `S2`.
+- Once `D1`–`D3` exist, start Backend phases `B1`–`B7`, alongside Database `D7`–`D9` and Storage `S2`.
 - Once Backend's core engines (`B4`–`B13`) exist, start Agentic AI `A1` onward, alongside remaining Backend `B14`–`B18`.
 - Start Frontend `F1`–`F11` as soon as their specific Backend dependencies are ready — they don't need the AI layer at all. Start Frontend `F12`/`F13` only once the matching Agentic AI graphs are complete.
 - Run Backend `B19`, Frontend `F20`, and Backend `B20` last, once every other track has substantially landed.
@@ -60,17 +58,17 @@ Read this once. These are the shared decisions that prevent every phase below fr
 13. **Checkpoint pause/resume mechanic.** When the `clarify` node needs to pause a run, it uses LangGraph's built-in interrupt/checkpoint mechanism (backed by the Postgres checkpointer pointed at Supabase) — not a custom "pending question" table. The frontend shows the question, the user answers, and the backend resumes the *same* `thread_id` with the answer as new input. It never starts a new run for this. This is what makes multi-turn generation feel like one continuous conversation instead of disconnected requests.
 14. **Realtime payload approach.** For MVP, `project_live_state` carries the full current project-model JSON, and Supabase Realtime pushes the full row on every change — the frontend never needs a follow-up fetch to catch up. This is the simplest correct approach at MVP scale. If a project's JSON eventually grows large enough for this to matter (watch for it, don't pre-solve it), the documented fallback is to shrink the Realtime-tracked row to a lightweight invalidation signal (`{project_id, version_id, updated_at}`) and have the frontend re-fetch full state via REST on receipt.
 15. **SVG pin coordinate system.** Every component's pin positions in `component_definitions` are stored as coordinates relative to the SVG's own `viewBox` — not screen pixels, not percentages of the browser window. The Storage Plan's visual standard must commit to this same convention. The frontend converts these viewBox-relative coordinates into the CSS position of each React Flow handle at render time, scaled to the node's actual rendered size. Get this wrong and pins visually drift from where wires attach — treat it as load-bearing, not a nice-to-have detail.
-16. **Background job idempotency.** Every Arq job (exports, pricing refresh, scheduled rollups, doc/code regeneration) must be safe to run twice with the same input without duplicate side effects — an export job overwrites its own prior output object in R2 rather than creating a second copy; a retried rollup job upserts rather than inserting again. Never assume a job only ever runs once.
+16. **FastAPI Background Tasks & Async Processing.** For MVP, asynchronous operations (such as PDF generation, ZIP packaging, or export tasks) run directly in FastAPI using built-in `BackgroundTasks` or direct async handlers, completely eliminating the operational overhead, provisioning, and points of failure of Redis and external worker daemons (like Arq/Celery). Jobs write their output to storage idempotently.
 
 ---
 
 ## Quick Phase Index
 
-**Database Master Plan** — D1 Identity and Profiles Schema · D2 Project Domain Schema · D3 Component Catalog Schema · D4 Derived and Generated Data Schema · D5 AI Domain Schema · D6 Admin and Operations Schema · D7 Row-Level Security Policy Pass · D8 Realtime Configuration · D9 Migration and Environment Strategy · D10 Retention and Archival Policy
+**Database Master Plan** — D1 Identity and Profiles Schema · D2 Project Domain Schema · D3 Component Catalog Schema · D4 Derived and Generated Data Schema · D5 AI Domain Schema · D6 Admin and Operations Schema · D7 Row-Level Security Policy Pass · D8 Realtime Configuration · D9 Migration and Environment Strategy
 
 **Backend Master Plan** — B1 Backend Scaffold and Core Conventions · B2 Auth Integration · B3 Project Persistence Skeleton · B4 Circuit Engine: Domain Models and Mutation Service · B5 Circuit Engine: Mutation Operations · B6 Circuit Engine: Post-Mutation Pipeline and Realtime Sync · B7 Component Database Service · B8 Validation Engine: Rule Framework · B9 Validation Engine: Initial Rule Set · B10 BOM and Cost Engine · B11 Code Generation Engine · B12 Documentation and Flowchart Generation Engine · B13 AI Orchestration Interface · B14 Versioning and History Service · B15 Export Service · B16 Sharing and Permissions · B17 Admin Dashboard and Analytics Backend · B18 AI Usage and Token Tracking Backend · B19 Security Hardening and Testing · B20 MVP Integration and Launch Readiness
 
-**Agentic AI Master Plan** — A1 Tool and Function Contract Definition · A2 Generation Graph: Requirement Analysis and Component Selection · A3 Reference Wiring-Pattern Library · A4 Generation Graph: Circuit Construction and Validation · A5 Generation Graph: BOM, Code, and Documentation · A6 Modification Graph · A7 Model Routing and Cost Optimization · A8 Datasheet Ingestion Pipeline · A9 Evaluation and Regression Framework · A10 Observability
+**Agentic AI Master Plan** — A1 Tool and Function Contract Definition · A2 Generation Graph: Requirement Analysis and Component Selection · A3 Reference Wiring-Pattern Library · A4 Generation Graph: Circuit Construction and Validation · A5 Generation Graph: BOM, Code, and Documentation · A6 Modification Graph · A7 Model Routing and Cost Optimization · A9 Evaluation and Regression Framework · A10 Observability
 
 **Frontend Master Plan** — F1 Frontend Scaffold and Design System · F2 Auth Screens and Session Handling · F3 Dashboard: Project List and Management · F4 Typed API Client Generation · F5 Project Workspace Shell · F6 Circuit Canvas: React Flow Base Setup · F7 Circuit Canvas: Custom Node Types and SVG Symbol Integration · F8 Circuit Canvas: Wire and Edge Styling and Interaction · F9 State Management: Store and Backend Sync · F10 Realtime Sync Integration · F11 Component Library Sidebar and Properties Panel · F12 AI Chat Panel: Generation Flow UI · F13 AI Chat Panel: Conversational Modification UI · F14 Validation and BOM Views · F15 Code and Documentation Views · F16 Export UI · F17 Sharing UI · F18 Versioning UI · F19 Admin Dashboard UI · F20 Landing Page and Final Polish
 
@@ -93,14 +91,12 @@ Read this once. These are the shared decisions that prevent every phase below fr
 
 - Create the monorepo with workspaces: `apps/frontend` (Next.js), `apps/backend` (FastAPI), `packages/shared-types`
 - Initialize git; agree branching model and commit/PR conventions
-- Create two Cloudflare R2 buckets: a public asset bucket and a private output bucket; record bucket names and access keys
-- Define the environment variable contract: `.env.example` files for frontend and backend listing every required key (Supabase URL/keys, Gemini API key, Claude API key, R2 credentials, Redis URL)
+- Create two Cloudflare R2 buckets (or Supabase Storage buckets): a public asset bucket and a private output bucket; record bucket names and access keys
+- Define the environment variable contract: `.env.example` files for frontend and backend listing every required key (Supabase URL/keys, Gemini API key, Claude API key, R2/Storage credentials)
 - Scaffold the Next.js app: App Router, TypeScript, Tailwind CSS, shadcn/ui installed with a base theme
-- Scaffold the FastAPI app with the domain-driven folder layout: `core/`, `db/`, `domains/`, `workers/`, `main.py`
-- Set up Docker: a Dockerfile for the backend and a docker-compose file for local dev covering backend, Redis, and the Supabase CLI local stack
+- Scaffold the FastAPI app with the domain-driven folder layout: `core/`, `db/`, `domains/`, `main.py`
+- Set up Docker: a Dockerfile for the backend and a docker-compose file for local dev covering backend and the Supabase CLI local stack
 - Set up linting/formatting: ESLint + Prettier for frontend, Ruff/Black + mypy for backend
-- Set up a CI skeleton running lint, type-check, and build on every pull request for both apps
-- Provision Redis (Upstash or equivalent) and confirm connectivity from the backend
 - Confirm Gemini and Claude API keys are provisioned and reachable via a trivial standalone test script
 - Write a root README documenting repo structure and how to run every part locally
 
@@ -222,7 +218,7 @@ Structure and design only — no query syntax. Supabase-based: Postgres, Auth, S
 
 - `ai_agent_runs.thread_id` should map directly to the LangGraph checkpointer's own thread identifier — don't invent a second ID to keep in sync.
 - `model_usage_logs` needs a row per model call, not per graph run — a single run can call multiple models across multiple nodes, and cost/token tracking (`B18`) needs that granularity.
-- `model_routing_config` must be readable without a deploy to change — it's data the admin edits, not a config file baked into the container image.
+- Model routing mappings and tier definitions are configured via environment variables and application settings (Pydantic settings) rather than a database table, keeping MVP operations clean and fast.
 
 **Tasks**
 
@@ -231,8 +227,7 @@ Structure and design only — no query syntax. Supabase-based: Postgres, Auth, S
 - Design `ai_conversation_messages`: project-scoped chat history
 - Design `model_usage_logs`: provider, node/step, tokens in, tokens out, latency, estimated cost
 - Design `ai_usage_limits`: per-user rolled-up counters and configured limits
-- Design `model_routing_config`: node/step to model/tier mapping
-- Design RLS: owner-scoped for conversation/run history; usage, limits, and routing config restricted to service-role and admin read
+- Design RLS: owner-scoped for conversation/run history; usage and limits restricted to service-role and admin read
 
 **Definition of Done**
 
@@ -242,23 +237,22 @@ Structure and design only — no query syntax. Supabase-based: Postgres, Auth, S
 
 **Depends on:** D1
 
-**Goal:** Infrastructure for system-wide visibility.
+**Goal:** Infrastructure for system-wide visibility without separate background rollup daemons.
 
 **Technical Notes**
 
 - `failed_generations` should capture enough of the actual input (the user's original request, the stage that failed, the raw error) to reproduce the failure later — a bare error message without context isn't useful weeks later.
-- `system_metrics_daily` is populated by a scheduled job, never computed live on dashboard load.
+- For MVP, admin dashboard metrics (active users, total projects created, AI token counts, failure rates) are computed on-demand via direct, fast SQL aggregation queries over `projects`, `profiles`, `model_usage_logs`, and `failed_generations`, avoiding the need for a separate scheduled cron rollup worker or pre-aggregated tables.
 
 **Tasks**
 
 - Design `admin_audit_logs`: administrative actions on the system itself
 - Design `failed_generations`: pipeline stage, project/run reference, input context, error detail
-- Design `system_metrics_daily`: rolled-up daily numbers
 - Design RLS: admin-only read and write
 
 **Definition of Done**
 
-- Schema is ready for Backend `B17`'s rollup job and failure-capture logic to write into directly
+- Schema is ready for failure-capture logic and admin audit logging to write into directly
 
 ### D7 — Row-Level Security Policy Pass
 
@@ -323,25 +317,6 @@ Structure and design only — no query syntax. Supabase-based: Postgres, Auth, S
 
 - A migration written once can be applied identically to all three environments via one documented, repeatable command sequence
 
-### D10 — Retention and Archival Policy
-
-**Depends on:** D2, D5
-
-**Goal:** Storage growth is a planned decision, not a future surprise.
-
-**Technical Notes**
-
-- Write the policy as a concrete rule (for example: "keep the last N versions per project plus the current one; archive or drop older ones after M months") even if unenforced initially — a vague "we'll figure it out later" isn't something an implementer can build toward.
-
-**Tasks**
-
-- Define a practical retention/archival plan for `project_versions`, `ai_action_logs`, `model_usage_logs`
-- Confirm current schema choices don't make future archiving painful
-
-**Definition of Done**
-
-- A written retention policy exists and has been checked for feasibility against the current schema design
-
 ---
 
 ## 2. Backend Master Plan
@@ -366,12 +341,11 @@ Python and FastAPI. The priority build. Every engine here (Circuit, Validation, 
 - Implement the two Supabase client paths in separate modules
 - Implement structured JSON logging with a request-correlation-ID middleware
 - Implement a standard exception-handling layer and consistent error response shape
-- Set up the Arq worker entrypoint and Redis connection config; confirm a trivial background job runs end to end
 - Create the empty domain module skeleton (routers and services for every domain)
 
 **Definition of Done**
 
-- The app boots, a health-check endpoint responds, a trivial Arq job completes, and logs show correlation IDs end to end
+- The app boots, a health-check endpoint responds, and logs show correlation IDs end to end
 
 ### B2 — Auth Integration
 
@@ -660,25 +634,26 @@ Python and FastAPI. The priority build. Every engine here (Circuit, Validation, 
 
 ### B15 — Export Service
 
-**Depends on:** B11, B12, SETUP (R2 buckets must exist — see Review Summary item 2)
+**Depends on:** B11, B12, SETUP (Storage buckets must exist)
 
 **Goal:** Projects can leave the platform in genuinely usable form.
 
 **Technical Notes**
 
-- This phase does not depend on the Storage Plan's asset-sourcing work — only on the R2 buckets themselves existing, which happens in Master Setup.
+- This phase does not depend on the Storage Plan's asset-sourcing work — only on the Storage/R2 buckets themselves existing, which happens in Master Setup.
 - Structure the PDF's source as styled HTML/CSS assembled from the same deterministic and AI-authored content pieces used in `B12`, rather than writing PDF layout logic from scratch — WeasyPrint's whole value is letting the document be designed as a webpage.
-- Follow Global Convention 16: a retried export job for the same request overwrites its own prior output object in R2, never creates a duplicate.
+- Async export jobs run via FastAPI's native `BackgroundTasks` or direct streaming async endpoints without Redis/Arq overhead.
+- Follow Global Convention 16: a retried export job for the same request overwrites its own prior output object in storage, never creates a duplicate.
 
 **Tasks**
 
-- Implement an async Arq export job: PDF (WeasyPrint), PNG/SVG, raw JSON, BOM data, Arduino/ESP32 project ZIP
-- Upload generated files to the private R2 bucket, store the object key on `export_jobs`
-- Implement a job-status polling endpoint
+- Implement export generation: PDF (WeasyPrint), PNG/SVG, raw JSON, BOM data, Arduino/ESP32 project ZIP via FastAPI async endpoints / BackgroundTasks
+- Upload generated files to the private storage bucket, store the object key on `export_jobs`
+- Implement a job-status polling / direct download endpoint
 
 **Definition of Done**
 
-- Every listed export format can be generated for a test project and downloaded via a signed URL
+- Every listed export format can be generated for a test project and downloaded via a signed URL or direct stream
 
 ### B16 — Sharing and Permissions
 
@@ -705,17 +680,16 @@ Python and FastAPI. The priority build. Every engine here (Circuit, Validation, 
 
 **Depends on:** B2, D6
 
-**Goal:** System health and usage are visible without querying the database by hand.
+**Goal:** System health, active users, project volume, and AI usage are visible in real-time without querying the database by hand.
 
 **Technical Notes**
 
-- The daily rollup job is re-runnable for a given day without producing duplicate rows (upsert on the date key) — same idempotency expectation as any other background job.
+- Metrics are computed on-demand via fast SQL aggregation queries directly against `projects`, `profiles`, `model_usage_logs`, and `failed_generations` — no background cron rollup workers or pre-aggregated tables needed for MVP.
 - Failed-generation capture hooks into the same places that already raise/catch exceptions across `B13` and AI Phases `A2`–`A5`, wired in as those phases are built, not retrofitted later.
 
 **Tasks**
 
-- Implement admin-only endpoints: user list, project oversight, system activity feed
-- Implement the scheduled rollup job computing `system_metrics_daily`
+- Implement admin-only endpoints: user list, project oversight, system activity feed, real-time aggregate stats
 - Implement `failed_generations` capture at every pipeline stage that can fail
 
 **Definition of Done**
@@ -731,13 +705,13 @@ Python and FastAPI. The priority build. Every engine here (Circuit, Validation, 
 **Technical Notes**
 
 - The limit check happens before a new LangGraph run is allowed to start, not after — checking usage only after tokens are already spent defeats the purpose.
-- Cost estimation per call uses a small, centrally maintained lookup table of per-token pricing by model/provider, not hardcoded inline at every call site.
+- Cost estimation per call uses a small, centrally maintained lookup table of per-token pricing by model/provider configured in Pydantic settings, not hardcoded inline at every call site.
 
 **Tasks**
 
 - Log every model call into `model_usage_logs`
 - Implement per-user/day usage counters and enforce configured limits before a run starts
-- Implement the `model_routing_config` read path
+- Read model routing mappings and provider credentials from application settings
 
 **Definition of Done**
 
@@ -925,43 +899,22 @@ LangGraph orchestration over Gemini and Claude. Two graphs: a mostly-linear gene
 
 **Depends on:** D5, A2, A4, A5, A6
 
-**Goal:** Right-sized model usage per step, tunable without a redeploy.
+**Goal:** Right-sized, cost-effective model usage per graph node via clean declarative configuration.
 
 **Technical Notes**
 
-- Implement the complexity classifier as its own small, cheap model call (a short structured output) rather than a hand-written heuristic on prompt length or keyword matching — generalizes far better across real user phrasing than a regex ever will.
-- Log which route was actually chosen per run, not just the routing table's default — this is what makes it possible to later evaluate whether the routing rules match reality.
+- Configure per-node model assignment directly in application settings (Pydantic settings): lightweight, high-speed tier (e.g. Gemini 1.5/2.0 Flash) for requirement analysis, component search ranking, and initial structuring; advanced reasoning tier (e.g. Claude 3.5 Sonnet) for circuit construction, validation auto-repair reasoning, and conversational modification graphs.
+- Direct per-node routing eliminates the latency, cost, and failure surface of an extra dynamic LLM complexity classifier.
+- Log which model was used per step in `model_usage_logs` for complete auditability.
 
 **Tasks**
 
-- Implement routing dispatch reading from `model_routing_config`: stronger model for requirement analysis, circuit construction, and conversational modification; lighter tier for ranking retrieved components; multimodal model for datasheet parsing; mixed/escalating tier for code/docs prose
-- Implement the complexity classifier for code/docs escalation
+- Implement routing dispatch based on graph node type and configuration settings
 - Implement caching for repeated/similar component-pairing lookups
 
 **Definition of Done**
 
-- Routing behavior matches the documented default table and can change via configuration without a code deploy
-
-### A8 — Datasheet Ingestion Pipeline
-
-**Depends on:** D3, A1
-
-**Goal:** Grow the component catalog faster without sacrificing trust in the data.
-
-**Technical Notes**
-
-- Validate uploaded datasheet files for type and a reasonable size limit before they reach the model call — basic hygiene independent of any AI safety concern.
-- The human-review step presents AI-extracted fields side-by-side with a link back to the source PDF section they came from, if extractable, so review is a quick confirm-or-correct action rather than re-deriving values from scratch.
-
-**Tasks**
-
-- Implement extraction of pin/electrical-characteristic fields from datasheet PDFs using the multimodal model
-- Implement a human-review gate before committing to `component_definitions`
-- Mark AI-extracted, unreviewed entries clearly via the confidence flag
-
-**Definition of Done**
-
-- A new component can go from a raw datasheet PDF to a reviewed, trusted catalog entry through this pipeline
+- Routing behavior matches the configured per-node assignments and can be adjusted via environment variables without code changes
 
 ### A9 — Evaluation and Regression Framework
 
@@ -971,18 +924,18 @@ LangGraph orchestration over Gemini and Claude. Two graphs: a mostly-linear gene
 
 **Technical Notes**
 
-- Store the prompt suite and expected outcomes as versioned data in the repository, not a spreadsheet or a person's head, so it evolves with the code and runs in CI.
+- Store the prompt suite and expected outcomes as versioned data in the repository, not a spreadsheet or a person's head, so it evolves with the code and can be run locally on demand.
 - Distinguish "the AI chose a different but still valid component/wiring" from "the AI chose something actually wrong" when defining expected outcomes — encode acceptable alternatives explicitly, or the suite generates constant false alarms.
 
 **Tasks**
 
 - Build a maintained set of real sample prompts, simple through intentionally ambiguous/messy
 - Define expected outcomes per prompt
-- Automate running the suite regularly and flagging regressions
+- Create an evaluation runner script to test prompts and flag regressions locally
 
 **Definition of Done**
 
-- The suite runs on demand or on a schedule and clearly flags any regression in generation or modification quality
+- The suite runs on demand via a simple command and clearly flags any regression in generation or modification quality
 
 ### A10 — Observability
 
@@ -1080,14 +1033,13 @@ Next.js, TypeScript, Tailwind CSS, shadcn/ui, React Flow. Built as a thin, corre
 
 **Technical Notes**
 
-- Run codegen as a script invoked in CI and locally on demand, pointed at the backend's live OpenAPI schema — if this becomes a manual step, it will be skipped and types will drift regardless of the CI check.
+- Run codegen via an npm script on demand (`npm run codegen:api`), pointed at the backend's live OpenAPI schema.
 - Keep generated types in a clearly marked "do not hand-edit" location, with the thin wrapper (error handling, base URL, auth header injection) in a separate, hand-written file.
 
 **Tasks**
 
-- Set up OpenAPI-to-TypeScript codegen
+- Set up OpenAPI-to-TypeScript codegen script in `package.json`
 - Build a thin API client wrapper with consistent error handling
-- Wire a CI check for stale types
 
 **Definition of Done**
 
@@ -1500,7 +1452,6 @@ Cloudflare R2. Short and practical — this is the track the non-technical teamm
 | D7    | D1–D6                              |
 | D8    | D2                                  |
 | D9    | D1–D8                              |
-| D10   | D2, D5                              |
 | B1    | SETUP                               |
 | B2    | B1, D1                              |
 | B3    | B2, D2                              |
@@ -1528,7 +1479,6 @@ Cloudflare R2. Short and practical — this is the track the non-technical teamm
 | A5    | A4, B10, B11, B12                   |
 | A6    | A4, A5, B13                         |
 | A7    | D5, A2, A4, A5, A6                  |
-| A8    | D3, A1                              |
 | A9    | A2, A4, A5, A6                      |
 | A10   | D5, B17                             |
 | F1    | SETUP                               |

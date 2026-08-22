@@ -1,0 +1,29 @@
+{
+  "name": "eureka-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Electronics Project Builder Monorepo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/frontend",
+    "dev:frontend": "npm run dev --workspace=apps/frontend",
+    "dev:backend": "python -m uvicorn apps.backend.main:app --reload --host 0.0.0.0 --port 8000",
+    "build:frontend": "npm run build --workspace=apps/frontend",
+    "build:types": "npm run build --workspace=packages/shared-types",
+    "test:backend": "pytest apps/backend/tests",
+    "check:ai": "python apps/backend/scripts/test_ai_connectivity.py"
+  },
+  "keywords": [
+    "electronics",
+    "ai",
+    "circuit-builder",
+    "langgraph",
+    "fastapi",
+    "nextjs"
+  ],
+  "author": "Eureka Team",
+  "license": "MIT"
+}
