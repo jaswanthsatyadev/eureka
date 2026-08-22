@@ -26,9 +26,9 @@ class Settings(BaseSettings):
 
     # AI Model Provider (Google Gemini API Only - Free Tier for MVP)
     GEMINI_API_KEY: Optional[str] = Field(default=None, description="Google Gemini API key from AI Studio")
-    GEMINI_FAST_MODEL: str = Field(default="gemini-2.0-flash", description="Fast model for requirements/search")
+    GEMINI_FAST_MODEL: str = Field(default="gemini-2.5-flash", description="Fast model for requirements/search")
     GEMINI_REASONING_MODEL: str = Field(
-        default="gemini-2.0-flash",
+        default="gemini-2.5-flash",
         description="Reasoning model for circuit construction & editing"
     )
 

@@ -1,7 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from apps.backend.core.security import get_current_user, UserContext
-from apps.backend.core.exceptions import NotFoundException
 from .schemas import ProjectCreate, ProjectUpdate, ProjectSummary, ProjectDetail
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -13,17 +12,15 @@ async def create_project(
     current_user: UserContext = Depends(get_current_user),
 ):
     """Creates a new electronics project."""
-    # Stub implementation returning a scaffolded project
     import uuid
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
-    project_id = str(uuid.uuid4())
     return ProjectSummary(
-        id=project_id,
+        id=str(uuid.uuid4()),
         owner_id=current_user.user_id,
         title=data.title,
         category=data.category or "General",
-        status="draft",
+        status="active",
         is_favorite=False,
         current_version_id=None,
         created_at=now,
@@ -59,7 +56,7 @@ async def get_project(
         category="IoT",
         status="active",
         is_favorite=False,
-        current_version_id="1",
+        current_version_id=None,
         created_at=now,
         updated_at=now,
         circuit={
@@ -68,7 +65,7 @@ async def get_project(
             "wires": [],
             "nets": [],
             "requirements": {
-                "summary": "Sample requirement",
+                "summary": "",
                 "inputs": [],
                 "outputs": [],
                 "connectivity": []
@@ -94,7 +91,7 @@ async def update_project(
         category=data.category or "General",
         status=data.status or "active",
         is_favorite=data.is_favorite if data.is_favorite is not None else False,
-        current_version_id="1",
+        current_version_id=None,
         created_at=now,
         updated_at=now,
     )
